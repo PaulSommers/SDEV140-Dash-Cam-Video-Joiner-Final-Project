@@ -1,6 +1,8 @@
+import os  # Import os module to handle file paths
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog  # Import filedialog for directory selection
+from PIL import Image, ImageTk  # Import PIL modules to handle images
 from watchdog.observers import Observer  # Used to monitor file system events
 from watchdog.events import FileSystemEventHandler  # Base class for handling events
 import threading  # Used for running the observer in a separate thread
@@ -12,9 +14,27 @@ class DashCamVideoJoinerApp:
         self.root = root
         self.root.title("Dash Cam Video Joiner")
 
-        # Create a frame for layout
+        # Load the logo image
+        try:
+            # Determine the path to the logo image
+            logo_filename = "logo-tranparentBG.png"  # Use the transparent logo file
+            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), logo_filename)
+            # Open the logo image file
+            logo_image = Image.open(logo_path)
+            # Resize the image if necessary
+            logo_image = logo_image.resize((100, 100), Image.LANCZOS)
+            # Convert the image to a Tkinter-compatible photo image
+            logo_photo = ImageTk.PhotoImage(logo_image)
+            # Create a label to display the logo image
+            self.logo_label = ttk.Label(self.root, image=logo_photo)
+            self.logo_label.image = logo_photo  # Keep a reference to prevent garbage collection
+            self.logo_label.grid(row=0, column=0, sticky=tk.NW, padx=10, pady=10)
+        except Exception as e:
+            print(f"Error loading logo image: {e}")
+
+        # Create a frame to organize the rest of the widgets
         main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        main_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
         # Create a button to select directory
         self.select_directory_button = ttk.Button(
@@ -117,6 +137,8 @@ class VideoFileHandler(FileSystemEventHandler):
 def main():
     # Create the main application window
     root = tk.Tk()
+    # Set window size if necessary
+    root.geometry("600x400")
     # Instantiate the application class
     app = DashCamVideoJoinerApp(root)
     # Start the Tkinter event loop
