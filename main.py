@@ -1,9 +1,14 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog  # Import filedialog for directory selection
+from watchdog.observers import Observer  # Used to monitor file system events
+from watchdog.events import FileSystemEventHandler  # Base class for handling events
+import threading  # Used for running the observer in a separate thread
+import time
 
 class DashCamVideoJoinerApp:
     def __init__(self, root):
+        # Initialize the main application window
         self.root = root
         self.root.title("Dash Cam Video Joiner")
 
@@ -33,12 +38,19 @@ class DashCamVideoJoinerApp:
         self.status_label = ttk.Label(main_frame, text="Status: Idle")
         self.status_label.grid(row=2, column=0, columnspan=2, padx=5, pady=5)
 
-        self.selected_directory = None  # Variable to store the selected directory path
-        self.is_monitoring = False      # Flag to indicate if monitoring is active
+        # Variable to store the selected directory path
+        self.selected_directory = None
+
+        # Flag to indicate if monitoring is active
+        self.is_monitoring = False
+
+        # Initialize the observer object for directory monitoring
+        self.observer = None
 
     def select_directory(self):
         """Open a dialog to select a directory and store the selected path."""
         try:
+            # Open a directory selection dialog and get the selected path
             self.selected_directory = filedialog.askdirectory()
             if self.selected_directory:
                 print(f"Selected directory: {self.selected_directory}")
@@ -48,12 +60,29 @@ class DashCamVideoJoinerApp:
     def start_monitoring(self):
         """Start monitoring the selected directory."""
         if self.selected_directory:
-            # Set the monitoring flag to True
-            self.is_monitoring = True
-            # Update the status label to indicate monitoring has started
-            self.status_label.config(text="Status: Monitoring")
-            print("Monitoring started...")
-            # TODO: Implement the monitoring logic here
+            if not self.is_monitoring:
+                # Set the monitoring flag to True
+                self.is_monitoring = True
+                # Update the status label to indicate that monitoring has started
+                self.status_label.config(text="Status: Monitoring")
+                print("Monitoring started...")
+
+                # Create an event handler to respond to filesystem events
+                event_handler = VideoFileHandler()
+
+                # Create an observer to monitor filesystem events
+                self.observer = Observer()
+
+                # Schedule the observer to watch the selected directory
+                # The observer will use the event handler to handle events
+                self.observer.schedule(event_handler, self.selected_directory, recursive=False)
+
+                # Start the observer in a separate thread to keep the GUI responsive
+                monitoring_thread = threading.Thread(target=self.observer.start)
+                monitoring_thread.daemon = True  # Make the thread a daemon so it exits with the program
+                monitoring_thread.start()
+            else:
+                print("Monitoring is already active.")
         else:
             print("Please select a directory first.")
 
@@ -65,13 +94,32 @@ class DashCamVideoJoinerApp:
             # Update the status label to indicate monitoring has stopped
             self.status_label.config(text="Status: Stopped")
             print("Monitoring stopped.")
-            # TODO: Implement logic to stop monitoring
+
+            # Stop the observer if it is running
+            if self.observer:
+                self.observer.stop()   # Stop the observer thread
+                self.observer.join()   # Wait for the observer thread to finish
+                self.observer = None   # Reset the observer to None
         else:
             print("Monitoring is not active.")
 
+class VideoFileHandler(FileSystemEventHandler):
+    """Handles events related to video files in the monitored directory."""
+
+    def on_created(self, event):
+        """Called when a file or directory is created."""
+        if not event.is_directory:
+            file_path = event.src_path
+            # Print a message indicating a new file has been detected
+            print(f"New file detected: {file_path}")
+            # TODO: Implement video processing logic here
+
 def main():
+    # Create the main application window
     root = tk.Tk()
+    # Instantiate the application class
     app = DashCamVideoJoinerApp(root)
+    # Start the Tkinter event loop
     root.mainloop()
 
 if __name__ == "__main__":
