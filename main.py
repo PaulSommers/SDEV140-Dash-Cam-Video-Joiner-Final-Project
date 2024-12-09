@@ -11,6 +11,8 @@ import time
 import pystray  # Import pystray for system tray icon handling
 from pystray import MenuItem as item  # Import MenuItem for creating menu items in the tray icon
 import datetime
+from moviepy.editor import VideoFileClip, concatenate_videoclips  # Import MoviePy for video processing
+import configparser  # For handling configuration files
 
 class DashCamVideoJoinerApp:
     def __init__(self, root):
@@ -96,6 +98,18 @@ class DashCamVideoJoinerApp:
         # Variable to store the selected video file extension
         self.video_extension = '.mp4'  # Default extension
 
+        # Path to the configuration file
+        self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
+
+        # Load configurations
+        self.load_config()
+
+        # Update GUI elements with loaded configurations
+        self.dir_var = tk.StringVar(value=self.selected_directory or "No directory selected")
+        self.threshold_var = tk.StringVar(value=str(self.time_threshold))
+        self.format_var = tk.StringVar(value=self.timestamp_format)
+        self.extension_var = tk.StringVar(value=self.video_extension)
+
     def hide_window(self):
         """Hide the main window and show the tray icon."""
         self.root.withdraw()  # Hide the main window
@@ -130,6 +144,10 @@ class DashCamVideoJoinerApp:
         # Stop monitoring if it is active
         if self.is_monitoring:
             self.stop_monitoring()
+
+        # Save configuration before exiting
+        self.save_config()
+
         # Destroy the main window to exit the application
         self.root.destroy()
 
@@ -279,12 +297,27 @@ class DashCamVideoJoinerApp:
             # Save the video file extension
             self.video_extension = self.extension_var.get()
 
+            # Save the selected directory
+            if self.dir_var.get() != "No directory selected":
+                self.selected_directory = self.dir_var.get()
+
+            # Save the configurations to file
+            self.save_config()
+
             config_window.destroy()
 
         save_button = ttk.Button(
             config_frame, text="Save", command=save_config
         )
         save_button.grid(row=4, column=1, padx=5, pady=10)
+
+        # Update the directory display variable
+        self.dir_var.set(self.selected_directory or "No directory selected")
+
+        # Update other configuration variables
+        self.threshold_var.set(str(self.time_threshold))
+        self.format_var.set(self.timestamp_format)
+        self.extension_var.set(self.video_extension)
 
     def validate_timestamp_format(self, format_str):
         """
@@ -412,6 +445,54 @@ class DashCamVideoJoinerApp:
 
         # TODO: Redirect print statements or use a logging framework to display real logs
 
+    def load_config(self):
+        """
+        Load the configuration settings from the config file.
+        """
+        # Create a ConfigParser instance with interpolation disabled
+        config = configparser.ConfigParser(interpolation=None)
+
+        if os.path.exists(self.config_file):
+            config.read(self.config_file)
+            if 'Settings' in config:
+                # Load settings if they exist
+                self.selected_directory = config.get('Settings', 'selected_directory', fallback=None)
+                self.time_threshold = config.getint('Settings', 'time_threshold', fallback=90)
+                self.timestamp_format = config.get('Settings', 'timestamp_format', fallback='%Y%m%d_%H%M%S')
+                self.video_extension = config.get('Settings', 'video_extension', fallback='.mp4')
+            else:
+                # Set default values if 'Settings' section is missing
+                self.set_default_config()
+        else:
+            # Set default values if config file doesn't exist
+            self.set_default_config()
+
+    def save_config(self):
+        """
+        Save the configuration settings to the config file.
+        """
+        # Create a ConfigParser instance with interpolation disabled
+        config = configparser.ConfigParser(interpolation=None)
+        config['Settings'] = {
+            'selected_directory': self.selected_directory if self.selected_directory else '',
+            'time_threshold': str(self.time_threshold),
+            'timestamp_format': self.timestamp_format,
+            'video_extension': self.video_extension
+        }
+
+        with open(self.config_file, 'w') as configfile:
+            config.write(configfile)
+        print("Configuration saved to config.ini")
+
+    def set_default_config(self):
+        """
+        Set default configuration values.
+        """
+        self.selected_directory = None
+        self.time_threshold = 90
+        self.timestamp_format = '%Y%m%d_%H%M%S'
+        self.video_extension = '.mp4'
+
 class VideoFileHandler(FileSystemEventHandler):
     """Handles events related to video files in the monitored directory."""
 
@@ -470,6 +551,76 @@ class VideoFileHandler(FileSystemEventHandler):
             # Handle the case where the filename does not match the expected format
             print(f"Error parsing timestamp from filename '{filename}': {e}")
             return None
+
+    def process_videos(self):
+        """
+        Processes the collected video files, groups them based on the time threshold,
+        and joins the videos in each group.
+        """
+        # Ensure there are enough videos to process
+        if len(self.video_files) < 2:
+            return
+
+        # Create a list to hold groups of videos to be joined
+        video_groups = []
+        current_group = [self.video_files[0]]
+
+        # Iterate over the video files to group them
+        for i in range(1, len(self.video_files)):
+            previous_timestamp = self.video_files[i - 1][1]
+            current_timestamp = self.video_files[i][1]
+            time_difference = (current_timestamp - previous_timestamp).total_seconds()
+            
+            if time_difference <= self.time_threshold:
+                # If the time difference is within the threshold, add to current group
+                current_group.append(self.video_files[i])
+            else:
+                # Time difference exceeds threshold; start a new group
+                video_groups.append(current_group)
+                current_group = [self.video_files[i]]
+        
+        # Add the last group
+        video_groups.append(current_group)
+        
+        # Process each group to join videos
+        for group in video_groups:
+            if len(group) > 1:
+                self.join_videos(group)
+
+    def join_videos(self, video_group):
+        """
+        Joins the videos in the given group into a single video file.
+        """
+        # Extract file paths from the group
+        video_paths = [video[0] for video in video_group]
+        try:
+            # Load video clips
+            clips = [VideoFileClip(path) for path in video_paths]
+            
+            # Concatenate video clips
+            final_clip = concatenate_videoclips(clips)
+            
+            # Generate output file name based on timestamps
+            start_time = video_group[0][1].strftime(self.timestamp_format)
+            end_time = video_group[-1][1].strftime(self.timestamp_format)
+            output_filename = f"joined_{start_time}_to_{end_time}{self.video_extension}"
+            output_path = os.path.join(os.path.dirname(video_paths[0]), output_filename)
+            
+            # Write the final video to the output file
+            final_clip.write_videofile(output_path)
+            
+            print(f"Videos joined successfully: {output_filename}")
+            
+            # Optionally, delete original files after joining
+            for path in video_paths:
+                os.remove(path)
+                print(f"Deleted original file: {path}")
+            
+            # Remove the processed videos from the list
+            self.video_files = [video for video in self.video_files if video[0] not in video_paths]
+        
+        except Exception as e:
+            print(f"Error joining videos: {e}")
 
 def main():
     # Create the main application window
