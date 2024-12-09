@@ -56,10 +56,23 @@ class DashCamVideoJoinerApp:
 
         # Create a label to display the status
         self.status_label = ttk.Label(main_frame, text="Status: Idle")
-        self.status_label.grid(row=2, column=0, columnspan=2, padx=5, pady=5)
+        self.status_label.grid(row=3, column=0, columnspan=2, padx=5, pady=5)
+
+        # Create a label for the time threshold input
+        self.threshold_label = ttk.Label(main_frame, text="Time Threshold (seconds):")
+        self.threshold_label.grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+
+        # Create an entry widget for the time threshold
+        self.threshold_var = tk.StringVar()
+        self.threshold_var.set("90")  # Default value for time threshold
+        self.threshold_entry = ttk.Entry(main_frame, textvariable=self.threshold_var)
+        self.threshold_entry.grid(row=2, column=1, padx=5, pady=5, sticky=tk.W)
 
         # Variable to store the selected directory path
         self.selected_directory = None
+
+        # Variable to store the time threshold value
+        self.time_threshold = 90  # Default time threshold in seconds
 
         # Flag to indicate if monitoring is active
         self.is_monitoring = False
@@ -81,14 +94,27 @@ class DashCamVideoJoinerApp:
         """Start monitoring the selected directory."""
         if self.selected_directory:
             if not self.is_monitoring:
+                # Get and validate the time threshold value
+                try:
+                    # Attempt to convert the input to an integer
+                    self.time_threshold = int(self.threshold_var.get())
+                    if self.time_threshold <= 0:
+                        # Time threshold must be a positive integer
+                        raise ValueError("Time threshold must be a positive integer.")
+                except ValueError as e:
+                    # Handle invalid input by displaying an error message
+                    print(f"Invalid time threshold: {e}")
+                    return  # Exit the method without starting monitoring
+
                 # Set the monitoring flag to True
                 self.is_monitoring = True
+
                 # Update the status label to indicate that monitoring has started
                 self.status_label.config(text="Status: Monitoring")
                 print("Monitoring started...")
 
                 # Create an event handler to respond to filesystem events
-                event_handler = VideoFileHandler()
+                event_handler = VideoFileHandler(time_threshold=self.time_threshold)
 
                 # Create an observer to monitor filesystem events
                 self.observer = Observer()
@@ -125,6 +151,13 @@ class DashCamVideoJoinerApp:
 
 class VideoFileHandler(FileSystemEventHandler):
     """Handles events related to video files in the monitored directory."""
+
+    def __init__(self, time_threshold):
+        super().__init__()
+        # Store the time threshold value for use in processing
+        self.time_threshold = time_threshold
+        # Initialize a list to keep track of video files
+        self.video_files = []
 
     def on_created(self, event):
         """Called when a file or directory is created."""
