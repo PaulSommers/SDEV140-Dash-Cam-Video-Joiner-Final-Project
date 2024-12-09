@@ -193,9 +193,10 @@ class DashCamVideoJoinerApp:
         """Toggle monitoring on or off."""
         if not self.is_monitoring:
             # Start monitoring if not already active
-            self.start_monitoring()
-            # Change button text to indicate the new action
-            self.monitor_button.config(text="Stop Monitoring")
+            started = self.start_monitoring()
+            if started:
+                # Change button text to indicate the new action only if monitoring started
+                self.monitor_button.config(text="Stop Monitoring")
         else:
             # Stop monitoring if currently active
             self.stop_monitoring()
@@ -216,7 +217,8 @@ class DashCamVideoJoinerApp:
                 except ValueError as e:
                     # Handle invalid input by displaying an error message
                     print(f"Invalid time threshold: {e}")
-                    return  # Exit the method without starting monitoring
+                    messagebox.showerror("Invalid Threshold", f"Invalid time threshold: {e}")
+                    return False  # Indicate that monitoring did not start
 
                 # Set the monitoring flag to True to indicate that monitoring is active
                 self.is_monitoring = True
@@ -237,12 +239,18 @@ class DashCamVideoJoinerApp:
 
                 # Start the observer in a separate thread to keep the GUI responsive
                 monitoring_thread = threading.Thread(target=self.observer.start)
-                monitoring_thread.daemon = True  # Make the thread a daemon so it exits with the program
+                monitoring_thread.daemon = True  # Ensure thread exits when the program closes
                 monitoring_thread.start()
+
+                return True  # Indicate that monitoring started successfully
             else:
                 print("Monitoring is already active.")
+                return False  # Monitoring was already active
         else:
+            # No directory has been selected; inform the user
             print("Please select a directory first.")
+            messagebox.showwarning("No Directory Selected", "Please select a directory before starting monitoring.")
+            return False  # Indicate that monitoring did not start
 
     def stop_monitoring(self):
         """Stop monitoring the directory."""
