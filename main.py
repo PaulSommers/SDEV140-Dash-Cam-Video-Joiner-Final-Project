@@ -10,6 +10,7 @@ import threading  # Used for running the observer in a separate thread
 import time
 import pystray  # Import pystray for system tray icon handling
 from pystray import MenuItem as item  # Import MenuItem for creating menu items in the tray icon
+import datetime
 
 class DashCamVideoJoinerApp:
     def __init__(self, root):
@@ -89,6 +90,12 @@ class DashCamVideoJoinerApp:
         # System tray icon setup
         self.tray_icon = None  # Placeholder for the tray icon object
 
+        # Variable to store the timestamp format
+        self.timestamp_format = '%Y%m%d_%H%M%S'  # Default format
+
+        # Variable to store the selected video file extension
+        self.video_extension = '.mp4'  # Default extension
+
     def hide_window(self):
         """Hide the main window and show the tray icon."""
         self.root.withdraw()  # Hide the main window
@@ -133,7 +140,7 @@ class DashCamVideoJoinerApp:
             self.exit_app()  # Call the exit_app method to exit the application
 
     def open_configuration(self):
-        """Open the Configuration window to set directory and time threshold."""
+        """Open the Configuration window to set directory, time threshold, timestamp format, and video extension."""
         # Create a new Toplevel window
         config_window = tk.Toplevel(self.root)
         config_window.title("Configuration")
@@ -147,6 +154,7 @@ class DashCamVideoJoinerApp:
         dir_label = ttk.Label(config_frame, text="Selected Directory:")
         dir_label.grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
 
+        # Variable to display the selected directory
         self.dir_var = tk.StringVar()
         if self.selected_directory:
             self.dir_var.set(self.selected_directory)
@@ -161,21 +169,140 @@ class DashCamVideoJoinerApp:
         )
         select_dir_button.grid(row=0, column=2, padx=5, pady=5)
 
+        # Help button for directory selection
+        def show_directory_help():
+            message = (
+                "Select the directory where your dashcam videos are stored.\n"
+                "The application will monitor this directory for new video files.\n"
+                "Ensure you have read/write permissions to the selected directory."
+            )
+            messagebox.showinfo("Directory Selection Help", message)
+
+        dir_help_button = ttk.Button(config_frame, text="?", command=show_directory_help, width=2)
+        dir_help_button.grid(row=0, column=3, padx=5, pady=5)
+
         # Create a label for the time threshold input
         threshold_label = ttk.Label(config_frame, text="Time Threshold (seconds):")
         threshold_label.grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
 
-        # Create an entry widget for the time threshold
-        self.threshold_var = tk.StringVar()
-        self.threshold_var.set(str(self.time_threshold))  # Set to current time threshold
+        # Entry widget for the time threshold
+        self.threshold_var = tk.StringVar(value=str(self.time_threshold))
         threshold_entry = ttk.Entry(config_frame, textvariable=self.threshold_var)
         threshold_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
 
-        # Create a Save button to apply the configurations
-        save_button = ttk.Button(
-            config_frame, text="Save", command=config_window.destroy
+        # Help button for time threshold
+        def show_threshold_help():
+            message = (
+                "Set the maximum time gap (in seconds) between video files to be joined together.\n"
+                "Videos with timestamps within this threshold will be merged into continuous segments.\n"
+                "Adjust this value according to how your dashcam segments videos."
+            )
+            messagebox.showinfo("Time Threshold Help", message)
+
+        threshold_help_button = ttk.Button(config_frame, text="?", command=show_threshold_help, width=2)
+        threshold_help_button.grid(row=1, column=2, padx=5, pady=5)
+
+        # Label for the timestamp format input
+        format_label = ttk.Label(config_frame, text="Timestamp Format:")
+        format_label.grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+
+        # Entry widget for the timestamp format
+        self.format_var = tk.StringVar(value=self.timestamp_format)
+        format_entry = ttk.Entry(config_frame, textvariable=self.format_var, width=30)
+        format_entry.grid(row=2, column=1, padx=5, pady=5, sticky=tk.W, columnspan=2)
+
+        # Help button to show format guidelines
+        def show_format_help():
+            message = (
+                "Specify the format used in your dashcam video filenames.\n"
+                "Use Python's datetime format codes.\n\n"
+                "Examples:\n"
+                " - %Y%m%d_%H%M%S for '20231016_154923.mp4'\n"
+                " - %Y-%m-%d %Hh %Mm %Ss for '2024-11-11 15h 49m 23s.mp4'\n"
+                " - For full reference, visit:\n"
+                "   https://strftime.org/"
+            )
+            messagebox.showinfo("Timestamp Format Help", message)
+
+        help_button = ttk.Button(config_frame, text="?", command=show_format_help, width=2)
+        help_button.grid(row=2, column=3, padx=5, pady=5)
+
+        # Supported video extensions
+        video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.ts']
+
+        # Label for the video extension selection
+        extension_label = ttk.Label(config_frame, text="Video File Extension:")
+        extension_label.grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
+
+        # Combobox for selecting the video extension
+        self.extension_var = tk.StringVar(value=self.video_extension)
+        extension_combobox = ttk.Combobox(
+            config_frame,
+            textvariable=self.extension_var,
+            values=video_extensions,
+            state='readonly',
+            width=10
         )
-        save_button.grid(row=2, column=1, padx=5, pady=10)
+        extension_combobox.grid(row=3, column=1, padx=5, pady=5, sticky=tk.W)
+
+        # Help button for video extension
+        def show_extension_help():
+            message = (
+                "Select the file extension used by your dashcam videos.\n"
+                "The application will monitor and process files with this extension.\n"
+            )
+            messagebox.showinfo("Video File Extension Help", message)
+
+        extension_help_button = ttk.Button(
+            config_frame, text="?", command=show_extension_help, width=2
+        )
+        extension_help_button.grid(row=3, column=2, padx=5, pady=5)
+
+        # Adjust the position of the Save button
+        def save_config():
+            """Save the configuration settings and close the window."""
+            # Save the time threshold
+            try:
+                self.time_threshold = int(self.threshold_var.get())
+                if self.time_threshold <= 0:
+                    raise ValueError("Time threshold must be a positive integer.")
+            except ValueError as e:
+                messagebox.showerror("Invalid Threshold", f"Invalid time threshold: {e}")
+                return
+
+            # Save the timestamp format
+            self.timestamp_format = self.format_var.get()
+            if not self.validate_timestamp_format(self.timestamp_format):
+                messagebox.showerror("Invalid Format", "The timestamp format is invalid.")
+                return
+
+            # Save the video file extension
+            self.video_extension = self.extension_var.get()
+
+            config_window.destroy()
+
+        save_button = ttk.Button(
+            config_frame, text="Save", command=save_config
+        )
+        save_button.grid(row=4, column=1, padx=5, pady=10)
+
+    def validate_timestamp_format(self, format_str):
+        """
+        Validate the user-provided timestamp format.
+
+        Args:
+            format_str (str): The timestamp format string.
+
+        Returns:
+            bool: True if the format is valid, False otherwise.
+        """
+        try:
+            # Attempt to format the current time with the provided format
+            datetime.datetime.now().strftime(format_str)
+            return True
+        except Exception as e:
+            print(f"Invalid timestamp format: {e}")
+            return False
 
     def select_directory(self):
         """Open a dialog to select a directory and store the selected path."""
@@ -209,16 +336,12 @@ class DashCamVideoJoinerApp:
             if not self.is_monitoring:
                 # Get and validate the time threshold value
                 try:
-                    # Attempt to convert the input to an integer
                     self.time_threshold = int(self.threshold_var.get())
                     if self.time_threshold <= 0:
-                        # Time threshold must be a positive integer
                         raise ValueError("Time threshold must be a positive integer.")
                 except ValueError as e:
-                    # Handle invalid input by displaying an error message
-                    print(f"Invalid time threshold: {e}")
                     messagebox.showerror("Invalid Threshold", f"Invalid time threshold: {e}")
-                    return False  # Indicate that monitoring did not start
+                    return False
 
                 # Set the monitoring flag to True to indicate that monitoring is active
                 self.is_monitoring = True
@@ -228,13 +351,16 @@ class DashCamVideoJoinerApp:
                 print("Monitoring started...")
 
                 # Create an event handler to respond to filesystem events
-                event_handler = VideoFileHandler(time_threshold=self.time_threshold)
+                event_handler = VideoFileHandler(
+                    time_threshold=self.time_threshold,
+                    timestamp_format=self.timestamp_format,
+                    video_extension=self.video_extension
+                )
 
                 # Create an observer to monitor filesystem events
                 self.observer = Observer()
 
                 # Schedule the observer to watch the selected directory
-                # The observer will use the event handler to handle events
                 self.observer.schedule(event_handler, self.selected_directory, recursive=False)
 
                 # Start the observer in a separate thread to keep the GUI responsive
@@ -245,12 +371,12 @@ class DashCamVideoJoinerApp:
                 return True  # Indicate that monitoring started successfully
             else:
                 print("Monitoring is already active.")
-                return False  # Monitoring was already active
+                return False
         else:
             # No directory has been selected; inform the user
             print("Please select a directory first.")
             messagebox.showwarning("No Directory Selected", "Please select a directory before starting monitoring.")
-            return False  # Indicate that monitoring did not start
+            return False
 
     def stop_monitoring(self):
         """Stop monitoring the directory."""
@@ -289,20 +415,61 @@ class DashCamVideoJoinerApp:
 class VideoFileHandler(FileSystemEventHandler):
     """Handles events related to video files in the monitored directory."""
 
-    def __init__(self, time_threshold):
+    def __init__(self, time_threshold, timestamp_format, video_extension):
         super().__init__()
-        # Store the time threshold value for use in processing
+        # Store the time threshold value (in seconds) for use in processing
         self.time_threshold = time_threshold
-        # Initialize a list to keep track of video files
+        # Store the timestamp format for parsing
+        self.timestamp_format = timestamp_format
+        # Store the video file extension
+        self.video_extension = video_extension.lower()
+        # Initialize a list to keep track of video files and their timestamps
         self.video_files = []
 
     def on_created(self, event):
         """Called when a file or directory is created."""
         if not event.is_directory:
             file_path = event.src_path
-            # Print a message indicating a new file has been detected
-            print(f"New file detected: {file_path}")
-            # TODO: Implement video processing logic here
+            # Check if the file has the selected video extension
+            if file_path.lower().endswith(self.video_extension):
+                print(f"New video file detected: {file_path}")
+
+                # Extract the timestamp from the filename using the user-specified format
+                video_timestamp = self.extract_timestamp(file_path)
+
+                if video_timestamp:
+                    # Add the video file and its timestamp to the list
+                    self.video_files.append((file_path, video_timestamp))
+                    # Sort the list by timestamp to maintain chronological order
+                    self.video_files.sort(key=lambda x: x[1])
+                    print(f"Video timestamp extracted and stored: {video_timestamp}")
+                else:
+                    print(f"Failed to extract timestamp from filename: {file_path}")
+            else:
+                print(f"Ignored non-video file: {file_path}")
+
+    def extract_timestamp(self, file_path):
+        """
+        Extracts the timestamp from the video filename using the specified format.
+
+        Args:
+            file_path (str): The full path to the video file.
+
+        Returns:
+            datetime.datetime or None: The extracted timestamp, or None if parsing fails.
+        """
+        filename = os.path.basename(file_path)
+        # Remove the file extension to get the base name
+        base_name = os.path.splitext(filename)[0]
+
+        try:
+            # Parse the timestamp using the user-specified format
+            timestamp = datetime.datetime.strptime(base_name, self.timestamp_format)
+            return timestamp
+        except ValueError as e:
+            # Handle the case where the filename does not match the expected format
+            print(f"Error parsing timestamp from filename '{filename}': {e}")
+            return None
 
 def main():
     # Create the main application window
