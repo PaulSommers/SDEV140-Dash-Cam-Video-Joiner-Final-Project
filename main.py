@@ -13,6 +13,9 @@ from pystray import MenuItem as item  # Import MenuItem for creating menu items 
 import datetime
 from moviepy.editor import VideoFileClip, concatenate_videoclips  # Import MoviePy for video processing
 import configparser  # For handling configuration files
+import logging
+import queue  # Import queue module for thread-safe communication between threads
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DashCamVideoJoinerApp:
     def __init__(self, root):
@@ -55,11 +58,27 @@ class DashCamVideoJoinerApp:
         self.root.columnconfigure(0, weight=1)
         main_frame.columnconfigure((0, 1, 2), weight=1)
 
-        # Create a toggle button for monitoring
-        self.monitor_button = ttk.Button(
-            main_frame, text="Start Monitoring", command=self.toggle_monitoring
+        # Load and resize the 'play.jpg' image
+        play_image = Image.open('play.jpg')  # Open the play image file
+        play_image = play_image.resize((50, 50), Image.LANCZOS)  # Resize to 50x50 pixels using LANCZOS filter
+        self.play_photo = ImageTk.PhotoImage(play_image)  # Convert the image to a Tkinter-compatible PhotoImage
+
+        # Load and resize the 'pause.jpg' image
+        pause_image = Image.open('pause.jpg')  # Open the pause image file
+        pause_image = pause_image.resize((50, 50), Image.LANCZOS)  # Resize to 50x50 pixels using LANCZOS filter
+        self.pause_photo = ImageTk.PhotoImage(pause_image)  # Convert the image to a Tkinter-compatible PhotoImage
+
+        # Create the Start/Stop monitoring button with the 'play' image
+        self.start_stop_button = tk.Button(
+            main_frame,
+            image=self.play_photo,  # Set the button image to the 'play' image
+            command=self.toggle_monitoring  # Bind the button to the toggle function
         )
-        self.monitor_button.grid(row=0, column=0, padx=5, pady=5)
+        self.start_stop_button.grid(row=0, column=0, padx=5, pady=5)
+
+        # Create a label below the button to display the text
+        self.start_stop_label = ttk.Label(main_frame, text="Start Monitoring")
+        self.start_stop_label.grid(row=1, column=0, padx=5, pady=(0, 10))
 
         # Create a button to open the Configuration window
         self.config_button = ttk.Button(
@@ -75,7 +94,7 @@ class DashCamVideoJoinerApp:
 
         # Create a label to display the status
         self.status_label = ttk.Label(main_frame, text="Status: Idle")
-        self.status_label.grid(row=1, column=0, columnspan=3, padx=5, pady=10)
+        self.status_label.grid(row=2, column=0, columnspan=3, padx=5, pady=10)
 
         # Variable to store the selected directory path
         self.selected_directory = None
@@ -109,6 +128,9 @@ class DashCamVideoJoinerApp:
         self.threshold_var = tk.StringVar(value=str(self.time_threshold))
         self.format_var = tk.StringVar(value=self.timestamp_format)
         self.extension_var = tk.StringVar(value=self.video_extension)
+
+        # Initialize the log queue
+        self.log_queue = queue.Queue()
 
     def hide_window(self):
         """Hide the main window and show the tray icon."""
@@ -352,22 +374,22 @@ class DashCamVideoJoinerApp:
     def toggle_monitoring(self):
         """Toggle monitoring on or off."""
         if not self.is_monitoring:
-            # Start monitoring if not already active
+            # Start monitoring
             started = self.start_monitoring()
             if started:
-                # Change button text to indicate the new action only if monitoring started
-                self.monitor_button.config(text="Stop Monitoring")
+                self.start_stop_button.config(image=self.pause_photo)
+                self.start_stop_label.config(text="Pause Monitoring")  # Update label text
         else:
-            # Stop monitoring if currently active
+            # Stop monitoring
             self.stop_monitoring()
-            # Change button text back to the initial state
-            self.monitor_button.config(text="Start Monitoring")
+            self.start_stop_button.config(image=self.play_photo)
+            self.start_stop_label.config(text="Start Monitoring")  # Update label text
 
     def start_monitoring(self):
         """Start monitoring the selected directory."""
         if self.selected_directory:
             if not self.is_monitoring:
-                # Get and validate the time threshold value
+                # Validate the time threshold value
                 try:
                     self.time_threshold = int(self.threshold_var.get())
                     if self.time_threshold <= 0:
@@ -376,40 +398,47 @@ class DashCamVideoJoinerApp:
                     messagebox.showerror("Invalid Threshold", f"Invalid time threshold: {e}")
                     return False
 
-                # Set the monitoring flag to True to indicate that monitoring is active
                 self.is_monitoring = True
-
-                # Update the status label to indicate that monitoring has started
                 self.status_label.config(text="Status: Monitoring")
-                print("Monitoring started...")
+                logging.info("Monitoring started...")
 
-                # Create an event handler to respond to filesystem events
-                event_handler = VideoFileHandler(
+                # Initialize the event handler with the current configurations
+                self.event_handler = VideoFileHandler(
                     time_threshold=self.time_threshold,
                     timestamp_format=self.timestamp_format,
                     video_extension=self.video_extension
                 )
 
-                # Create an observer to monitor filesystem events
+                # Create the observer and schedule it
                 self.observer = Observer()
+                self.observer.schedule(self.event_handler, self.selected_directory, recursive=False)
+                self.observer.start()
 
-                # Schedule the observer to watch the selected directory
-                self.observer.schedule(event_handler, self.selected_directory, recursive=False)
+                # Process existing video files in the directory:
+                self.process_existing_files()
 
-                # Start the observer in a separate thread to keep the GUI responsive
-                monitoring_thread = threading.Thread(target=self.observer.start)
-                monitoring_thread.daemon = True  # Ensure thread exits when the program closes
-                monitoring_thread.start()
-
-                return True  # Indicate that monitoring started successfully
+                return True
             else:
-                print("Monitoring is already active.")
+                logging.info("Monitoring is already active.")
                 return False
         else:
-            # No directory has been selected; inform the user
-            print("Please select a directory first.")
+            logging.warning("Please select a directory first.")
             messagebox.showwarning("No Directory Selected", "Please select a directory before starting monitoring.")
             return False
+
+    def process_existing_files(self):
+        """Process existing video files in the selected directory when monitoring starts."""
+        # Iterate over all files in the selected directory
+        for filename in os.listdir(self.selected_directory):
+            if filename.lower().endswith(self.video_extension):
+                file_path = os.path.join(self.selected_directory, filename)
+                logging.info(f"Found existing video file: {file_path}")
+                # Create a mock event object to simulate a file creation event
+                event = type('Event', (object,), {})()
+                event.src_path = file_path
+                event.is_directory = False
+                # Manually trigger the on_created event handler for each file
+                self.event_handler.on_created(event)
 
     def stop_monitoring(self):
         """Stop monitoring the directory."""
@@ -439,11 +468,32 @@ class DashCamVideoJoinerApp:
         log_text = tk.Text(log_window, wrap='word', height=15, width=60)
         log_text.pack(expand=True, fill='both', padx=10, pady=10)
 
-        # For now, display placeholder text in the log window
-        log_content = "Log output will be displayed here.\n"
-        log_text.insert('end', log_content)
+        # Create a logging handler to display logs in the Text widget
+        text_handler = TextHandler(self.log_queue)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        text_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(text_handler)
 
-        # TODO: Redirect print statements or use a logging framework to display real logs
+        # Start polling the log queue
+        self.poll_log_queue(log_text)
+
+        # Store a reference to the handler so we can remove it later
+        self.current_text_handler = text_handler
+
+        # Define what happens when the log window is closed
+        def on_log_window_close():
+            # Remove the logging handler
+            logging.getLogger().removeHandler(text_handler)
+            # Destroy the log window
+            log_window.destroy()
+            # Clear the reference to the handler
+            self.current_text_handler = None
+
+        # Bind the close event to the on_log_window_close function
+        log_window.protocol("WM_DELETE_WINDOW", on_log_window_close)
+
+        # Set the logging level if needed
+        logging.getLogger().setLevel(logging.INFO)
 
     def load_config(self):
         """
@@ -458,7 +508,7 @@ class DashCamVideoJoinerApp:
                 # Load settings if they exist
                 self.selected_directory = config.get('Settings', 'selected_directory', fallback=None)
                 self.time_threshold = config.getint('Settings', 'time_threshold', fallback=90)
-                self.timestamp_format = config.get('Settings', 'timestamp_format', fallback='%Y%m-%d_%H%M%S')
+                self.timestamp_format = config.get('Settings', 'timestamp_format', fallback='%Y-%m-%d %Hh %Mm %Ss')
                 self.video_extension = config.get('Settings', 'video_extension', fallback='.mp4')
             else:
                 # Set default values if 'Settings' section is missing
@@ -493,6 +543,19 @@ class DashCamVideoJoinerApp:
         self.timestamp_format = '%Y-%m-%d %Hh %Mm %Ss'  # Updated default format
         self.video_extension = '.mp4'
 
+    def poll_log_queue(self, log_text_widget):
+        """Periodically poll the log queue and display log records in the Text widget."""
+        try:
+            while True:
+                record = self.log_queue.get_nowait()
+                log_text_widget.insert(tk.END, record + '\n')
+                log_text_widget.see(tk.END)
+        except queue.Empty:
+            pass
+        if self.current_text_handler:
+            # Schedule the poll_log_queue method to be called again after 100 milliseconds
+            log_text_widget.after(100, self.poll_log_queue, log_text_widget)
+
 class VideoFileHandler(FileSystemEventHandler):
     """Handles events related to video files in the monitored directory."""
 
@@ -507,13 +570,16 @@ class VideoFileHandler(FileSystemEventHandler):
         # Initialize a list to keep track of video files and their timestamps
         self.video_files = []
 
+        # New attribute to keep track of processed time ranges
+        self.processed_time_ranges = []  # List to store tuples of (start_time, end_time)
+
     def on_created(self, event):
         """Called when a file or directory is created."""
         if not event.is_directory:
             file_path = event.src_path
             # Check if the file has the selected video extension
             if file_path.lower().endswith(self.video_extension):
-                print(f"New video file detected: {file_path}")
+                logging.info(f"New video file detected: {file_path}")
 
                 # Extract the timestamp from the filename using the user-specified format
                 video_timestamp = self.extract_timestamp(file_path)
@@ -523,14 +589,14 @@ class VideoFileHandler(FileSystemEventHandler):
                     self.video_files.append((file_path, video_timestamp))
                     # Sort the list by timestamp to maintain chronological order
                     self.video_files.sort(key=lambda x: x[1])
-                    print(f"Video timestamp extracted and stored: {video_timestamp}")
+                    logging.info(f"Video timestamp extracted and stored: {video_timestamp}")
 
                     # Call process_videos to handle the new video files
                     self.process_videos()
                 else:
-                    print(f"Failed to extract timestamp from filename: {file_path}")
+                    logging.info(f"Failed to extract timestamp from filename: {file_path}")
             else:
-                print(f"Ignored non-video file: {file_path}")
+                logging.info(f"Ignored non-video file: {file_path}")
 
     def extract_timestamp(self, file_path):
         """
@@ -545,14 +611,20 @@ class VideoFileHandler(FileSystemEventHandler):
         filename = os.path.basename(file_path)
         # Remove the file extension to get the base name
         base_name = os.path.splitext(filename)[0]
+        logging.info(f"Attempting to extract timestamp from filename: {base_name}")
 
         try:
             # Parse the timestamp using the user-specified format
             timestamp = datetime.datetime.strptime(base_name, self.timestamp_format)
+            logging.info(f"Successfully extracted timestamp: {timestamp}")
+
+            # Add a print statement for validation
+            print(f"Extracted timestamp from '{filename}': {timestamp}")
+
             return timestamp
         except ValueError as e:
             # Handle the case where the filename does not match the expected format
-            print(f"Error parsing timestamp from filename '{filename}': {e}")
+            logging.error(f"Error parsing timestamp from filename '{filename}': {e}")
             return None
 
     def process_videos(self):
@@ -573,7 +645,7 @@ class VideoFileHandler(FileSystemEventHandler):
             previous_timestamp = self.video_files[i - 1][1]
             current_timestamp = self.video_files[i][1]
             time_difference = (current_timestamp - previous_timestamp).total_seconds()
-            
+
             if time_difference <= self.time_threshold:
                 # If the time difference is within the threshold, add to current group
                 current_group.append(self.video_files[i])
@@ -581,55 +653,115 @@ class VideoFileHandler(FileSystemEventHandler):
                 # Time difference exceeds threshold; start a new group
                 video_groups.append(current_group)
                 current_group = [self.video_files[i]]
-        
+
         # Add the last group
         video_groups.append(current_group)
-        
+
         # Process each group to join videos
         for group in video_groups:
             if len(group) > 1:
-                self.join_videos(group)
+                # Get the start and end timestamps of the group
+                group_start_time = group[0][1]
+                group_end_time = group[-1][1]
+
+                # Check if this group's time range overlaps with any processed time ranges
+                overlap = False
+                for processed_start, processed_end in self.processed_time_ranges:
+                    if group_start_time <= processed_end and group_end_time >= processed_start:
+                        # There is an overlap
+                        overlap = True
+                        logging.info(f"Skipping group starting at {group_start_time} due to overlap with processed range {processed_start} to {processed_end}.")
+                        break
+
+                if not overlap:
+                    # No overlap; proceed to join videos
+                    self.join_videos(group)
+                    # Add this group's time range to the list of processed ranges
+                    self.processed_time_ranges.append((group_start_time, group_end_time))
+                else:
+                    # Remove the videos in this group from the list to prevent reprocessing
+                    self.video_files = [video for video in self.video_files if video not in group]
 
     def join_videos(self, video_group):
         """
-        Joins the videos in the given group into a single video file.
+        Initiates the video joining process in a separate thread to prevent GUI freezing.
+
+        Args:
+            video_group (list): A list of tuples containing file paths and their corresponding timestamps.
         """
-        # Generate output file name based on timestamps
+        # Start a new thread and pass the video_group to the _join_videos_thread method
+        threading.Thread(target=self._join_videos_thread, args=(video_group,)).start()
+
+    def _join_videos_thread(self, video_group):
+        """
+        Performs the video joining operation. This method runs in a separate thread.
+
+        Args:
+            video_group (list): A list of tuples containing file paths and their corresponding timestamps.
+        """
+        # Generate output file name based on start and end timestamps
         start_time = video_group[0][1].strftime(self.timestamp_format)
         end_time = video_group[-1][1].strftime(self.timestamp_format)
         output_filename = f"joined_{start_time}_to_{end_time}{self.video_extension}"
         output_path = os.path.join(os.path.dirname(video_group[0][0]), output_filename)
-        
+        logging.info(f"Output file will be: {output_filename}")
+
         # Extract file paths from the group
         video_paths = [video[0] for video in video_group]
+
         try:
-            # Load video clips
-            clips = [VideoFileClip(path) for path in video_paths]
-            
-            # Concatenate video clips
-            final_clip = concatenate_videoclips(clips)
-            
-            # Generate output file name based on timestamps
-            start_time = video_group[0][1].strftime(self.timestamp_format)
-            end_time = video_group[-1][1].strftime(self.timestamp_format)
-            output_filename = f"joined_{start_time}_to_{end_time}{self.video_extension}"
-            output_path = os.path.join(os.path.dirname(video_paths[0]), output_filename)
-            
+            # Load video clips from the file paths
+            clips = []
+            for path in video_paths:
+                # Load each video file into a VideoFileClip object
+                clip = VideoFileClip(path)
+                clips.append(clip)
+                logging.info(f"Loaded video clip: {path}")
+
+            # Concatenate video clips into one final clip
+            final_clip = concatenate_videoclips(clips, method="compose")
+            logging.info("Video clips concatenated successfully.")
+
             # Write the final video to the output file
             final_clip.write_videofile(output_path)
-            
-            print(f"Videos joined successfully: {output_filename}")
-            
-            # Optionally, delete original files after joining
+            logging.info(f"Final video written to file: {output_path}")
+
+            # Close all the clips to release resources
+            for clip in clips:
+                clip.close()
+            final_clip.close()
+
+            # Delete original files after joining
             for path in video_paths:
-                os.remove(path)
-                print(f"Deleted original file: {path}")
-            
+                if os.path.exists(path):
+                    os.remove(path)
+                    logging.info(f"Deleted original file: {path}")
+
             # Remove the processed videos from the list
             self.video_files = [video for video in self.video_files if video[0] not in video_paths]
-        
+            logging.info("Updated video files list after processing.")
+
+            # Add group's time range to the list of processed ranges
+            self.processed_time_ranges.append((video_group[0][1], video_group[-1][1]))
+
         except Exception as e:
-            print(f"Error joining videos: {e}")
+            logging.error(f"Error joining videos: {e}", exc_info=True)
+            
+            # Optionally, display an error message in the GUI
+            # Must use the main thread to show message boxes
+            self.root.after(0, lambda: messagebox.showerror("Video Joining Error", f"An error occurred during video processing:\n{e}"))
+
+# Handle logging in Tkinter
+class TextHandler(logging.Handler):
+    """This class allows logging to a queue, which is polled from the main thread."""
+    def __init__(self, log_queue):
+        super().__init__()
+        self.log_queue = log_queue
+
+    def emit(self, record):
+        msg = self.format(record)
+        # Put the message into the queue
+        self.log_queue.put(msg)
 
 def main():
     # Create the main application window
