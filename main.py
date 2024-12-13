@@ -93,7 +93,7 @@ class DashCamVideoJoinerApp:
         self.tray_icon = None  # Placeholder for the tray icon object
 
         # Variable to store the timestamp format
-        self.timestamp_format = '%Y%m%d_%H%M%S'  # Default format
+        self.timestamp_format = '%Y-%m-%d %Hh %Mm %Ss'  # Updated default format to '2024-11-11 15h 49m 23s'
 
         # Variable to store the selected video file extension
         self.video_extension = '.mp4'  # Default extension
@@ -458,7 +458,7 @@ class DashCamVideoJoinerApp:
                 # Load settings if they exist
                 self.selected_directory = config.get('Settings', 'selected_directory', fallback=None)
                 self.time_threshold = config.getint('Settings', 'time_threshold', fallback=90)
-                self.timestamp_format = config.get('Settings', 'timestamp_format', fallback='%Y%m%d_%H%M%S')
+                self.timestamp_format = config.get('Settings', 'timestamp_format', fallback='%Y%m-%d_%H%M%S')
                 self.video_extension = config.get('Settings', 'video_extension', fallback='.mp4')
             else:
                 # Set default values if 'Settings' section is missing
@@ -490,7 +490,7 @@ class DashCamVideoJoinerApp:
         """
         self.selected_directory = None
         self.time_threshold = 90
-        self.timestamp_format = '%Y%m%d_%H%M%S'
+        self.timestamp_format = '%Y-%m-%d %Hh %Mm %Ss'  # Updated default format
         self.video_extension = '.mp4'
 
 class VideoFileHandler(FileSystemEventHandler):
@@ -524,6 +524,9 @@ class VideoFileHandler(FileSystemEventHandler):
                     # Sort the list by timestamp to maintain chronological order
                     self.video_files.sort(key=lambda x: x[1])
                     print(f"Video timestamp extracted and stored: {video_timestamp}")
+
+                    # Call process_videos to handle the new video files
+                    self.process_videos()
                 else:
                     print(f"Failed to extract timestamp from filename: {file_path}")
             else:
@@ -591,6 +594,12 @@ class VideoFileHandler(FileSystemEventHandler):
         """
         Joins the videos in the given group into a single video file.
         """
+        # Generate output file name based on timestamps
+        start_time = video_group[0][1].strftime(self.timestamp_format)
+        end_time = video_group[-1][1].strftime(self.timestamp_format)
+        output_filename = f"joined_{start_time}_to_{end_time}{self.video_extension}"
+        output_path = os.path.join(os.path.dirname(video_group[0][0]), output_filename)
+        
         # Extract file paths from the group
         video_paths = [video[0] for video in video_group]
         try:
