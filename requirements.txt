@@ -1,4 +1,11 @@
 Pillow==11.0.0
 watchdog==6.0.0
 pystray==0.19.4
-moviepy==1.0.3 
+moviepy==1.0.3
+numpy==1.23.5
+decorator==5.1.1
+imageio==2.31.1
+imageio-ffmpeg==0.4.8
+requests==2.31.0
+certifi==2023.7.22
+tqdm==4.66.1 
